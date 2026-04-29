@@ -40,7 +40,7 @@ export default function Home() {
     }
   };
 
-  const syncLocationsFromApi = async () => {
+  const syncLocationsFromApi = async (showNewToast = false) => {
     if (isSyncingLocationsRef.current) {
       return;
     }
@@ -48,11 +48,29 @@ export default function Home() {
     isSyncingLocationsRef.current = true;
     try {
       const allLocations = await getAllLocations();
+      const nextIds = new Set(allLocations.map((location) => String(location.id)));
+      let insertedCount = 0;
+      if (showNewToast && hasLoadedInitialLocationsRef.current) {
+        for (const id of nextIds) {
+          if (!knownLocationIdsRef.current.has(id)) {
+            insertedCount += 1;
+          }
+        }
+      }
+
       knownLocationIdsRef.current = new Set(
         allLocations.map((location) => String(location.id))
       );
       hasLoadedInitialLocationsRef.current = true;
       setLocations(allLocations);
+
+      if (insertedCount > 0) {
+        toast.success(
+          insertedCount === 1
+            ? 'New location inserted'
+            : `${insertedCount} new locations inserted`
+        );
+      }
     } catch (err) {
       console.error('Failed to sync locations:', err);
     } finally {
@@ -76,13 +94,23 @@ export default function Home() {
 
   useEffect(() => {
     const fetchLocations = async () => {
-      await syncLocationsFromApi();
+      await syncLocationsFromApi(false);
       if (!hasLoadedInitialLocationsRef.current) {
         toast.error('Failed to load locations');
       }
     };
 
     fetchLocations();
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void syncLocationsFromApi(true);
+    }, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {
