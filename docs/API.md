@@ -21,6 +21,8 @@ POST /locations
   "longitude": 101.6869,
   "accuracy": 45,
   "timestamp": "2026-04-29T10:30:00Z",
+  "country": "Malaysia",
+  "state": "Selangor",
   "description": "Office location"
 }
 ```
@@ -33,6 +35,8 @@ POST /locations
   "longitude": 101.6869,
   "accuracy": 45,
   "timestamp": "2026-04-29T10:30:00Z",
+  "country": "Malaysia",
+  "state": "Selangor",
   "description": "Office location",
   "createdAt": "2026-04-29T10:30:00Z"
 }
@@ -206,6 +210,8 @@ curl -X POST http://localhost:5000/api/locations \
     "longitude": 101.6869,
     "accuracy": 45,
     "timestamp": "2026-04-29T10:30:00Z",
+    "country": "Malaysia",
+    "state": "Selangor",
     "description": "Office"
   }'
 
@@ -221,9 +227,46 @@ curl -X DELETE http://localhost:5000/api/locations/loc_123456
 
 ---
 
+## Frontend Grouping
+
+The frontend automatically groups locations by **Country → State**. When users tap "Get Location":
+
+1. They fill in **Country** dropdown (defaults to Malaysia)
+2. They select **State/Province** from the list
+3. GPS coordinates are captured
+4. Location is sent to backend with country and state
+
+The right sidebar displays:
+- **State Counters**: Shows how many users are in each state
+- **Country Headers**: Groups states by country
+- **Real-time Updates**: Counters refresh when new locations are added
+
+Example grouping display:
+```
+📍 Malaysia
+   ├─ Selangor: 5 users
+   ├─ Kuala Lumpur: 3 users
+   └─ Johor: 2 users
+
+📍 Singapore
+   └─ Singapore: 1 user
+```
+
+## Supported Countries
+
+Default countries (expandable):
+- **Malaysia** (13 states)
+- Singapore
+- Brunei
+- Thailand
+- Indonesia
+
 ## Notes
 
 - All timestamps are in ISO 8601 format (UTC)
 - Coordinates use WGS84 (EPSG:4326) projection
 - Accuracy is measured in meters
+- Country and State fields are **required** for grouping
 - The API runs on port 5000 by default
+- Frontend uses dropdowns for country/state (Malaysia default)
+- Locations are grouped for analytics and reporting

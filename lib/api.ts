@@ -5,15 +5,19 @@ export interface Location {
   accuracy?: number;
   timestamp: string;
   description?: string;
+  country: string;
+  state: string;
   createdAt: string;
 }
 
-interface LocationPayload {
+export interface LocationPayload {
   latitude: number;
   longitude: number;
   accuracy?: number;
   timestamp: string;
   description?: string;
+  country: string;
+  state: string;
 }
 
 interface LocationsResponse {
