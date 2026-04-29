@@ -2,7 +2,7 @@
 
 ## Base URL
 ```
-http://localhost:5000/api
+http://localhost:5000/api/v1
 ```
 
 ## Endpoints
@@ -178,7 +178,7 @@ DELETE /locations/:id
 ```typescript
 // Create a location
 async function createLocation(latitude: number, longitude: number, accuracy: number) {
-  const response = await fetch('http://localhost:5000/api/locations', {
+  const response = await fetch('http://localhost:5000/api/v1/locations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -194,7 +194,7 @@ async function createLocation(latitude: number, longitude: number, accuracy: num
 
 // Get all locations
 async function getAllLocations() {
-  const response = await fetch('http://localhost:5000/api/locations');
+  const response = await fetch('http://localhost:5000/api/v1/locations');
   return response.json();
 }
 ```
@@ -203,7 +203,7 @@ async function getAllLocations() {
 
 ```bash
 # Create location
-curl -X POST http://localhost:5000/api/locations \
+curl -X POST http://localhost:5000/api/v1/locations \
   -H "Content-Type: application/json" \
   -d '{
     "latitude": 3.1390,
@@ -216,30 +216,30 @@ curl -X POST http://localhost:5000/api/locations \
   }'
 
 # Get all locations
-curl http://localhost:5000/api/locations
+curl http://localhost:5000/api/v1/locations
 
 # Get specific location
-curl http://localhost:5000/api/locations/loc_123456
+curl http://localhost:5000/api/v1/locations/loc_123456
 
 # Delete location
-curl -X DELETE http://localhost:5000/api/locations/loc_123456
+curl -X DELETE http://localhost:5000/api/v1/locations/loc_123456
 ```
 
 ---
 
-## Frontend Grouping
+## Frontend Behavior
 
-The frontend automatically groups locations by **Country → State**. When users tap "Get Location":
+The frontend automatically groups locations by **State** and derives `country`/`state` using reverse geocoding during check-in.
 
-1. They fill in **Country** dropdown (defaults to Malaysia)
-2. They select **State/Province** from the list
-3. GPS coordinates are captured
-4. Location is sent to backend with country and state
+1. User taps **Check in**
+2. Browser geolocation captures coordinates
+3. Frontend reverse-geocodes coordinates (Nominatim/OpenStreetMap)
+4. Frontend sends location payload to backend (`/api/v1/locations`)
 
-The right sidebar displays:
-- **State Counters**: Shows how many users are in each state
-- **Country Headers**: Groups states by country
-- **Real-time Updates**: Counters refresh when new locations are added
+The main page displays:
+- **Map**: Pins all user locations
+- **Past 10 Locations**: Most recent check-ins
+- **Total by State**: Aggregated state counts
 
 Example grouping display:
 ```
@@ -268,5 +268,5 @@ Default countries (expandable):
 - Accuracy is measured in meters
 - Country and State fields are **required** for grouping
 - The API runs on port 5000 by default
-- Frontend uses dropdowns for country/state (Malaysia default)
-- Locations are grouped for analytics and reporting
+- Frontend check-in is guarded by session + cookie to avoid duplicate clicks in one session
+- Backoffice tools can generate random records and flush all records

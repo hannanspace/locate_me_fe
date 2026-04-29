@@ -7,7 +7,7 @@ This guide explains how to set up the backend API for the Locate Me application.
 The frontend expects a backend API running on `http://localhost:5000`. When you create a location via the "Get Location" button:
 
 1. The frontend captures your coordinates using the browser's Geolocation API
-2. It sends the data to the backend API (`POST /api/locations`)
+2. It sends the data to the backend API (`POST /api/v1/locations`)
 3. The location is saved in the database
 4. The marker appears on the map automatically
 
@@ -25,11 +25,11 @@ This is set in `.env.local`. Change the URL if your backend runs on a different 
 
 ### Core Endpoints
 
-- **POST /api/locations** - Create a new location
-- **GET /api/locations** - Retrieve all locations
-- **GET /api/locations/:id** - Get a specific location
-- **PUT /api/locations/:id** - Update a location
-- **DELETE /api/locations/:id** - Delete a location
+- **POST /api/v1/locations** - Create a new location
+- **GET /api/v1/locations** - Retrieve all locations
+- **GET /api/v1/locations/:id** - Get a specific location
+- **PUT /api/v1/locations/:id** - Update a location
+- **DELETE /api/v1/locations/:id** - Delete a location
 
 See [API.md](./API.md) for detailed documentation.
 
@@ -54,7 +54,7 @@ app.use(express.json());
 const locations = {};
 
 // Create location
-app.post('/api/locations', (req, res) => {
+app.post('/api/v1/locations', (req, res) => {
   const { latitude, longitude, accuracy, timestamp, description } = req.body;
   
   if (!latitude || !longitude) {
@@ -77,7 +77,7 @@ app.post('/api/locations', (req, res) => {
 });
 
 // Get all locations
-app.get('/api/locations', (req, res) => {
+app.get('/api/v1/locations', (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
   
@@ -93,7 +93,7 @@ app.get('/api/locations', (req, res) => {
 });
 
 // Get location by ID
-app.get('/api/locations/:id', (req, res) => {
+app.get('/api/v1/locations/:id', (req, res) => {
   const location = locations[req.params.id];
   if (!location) {
     return res.status(404).json({ error: 'Location not found' });
@@ -102,7 +102,7 @@ app.get('/api/locations/:id', (req, res) => {
 });
 
 // Update location
-app.put('/api/locations/:id', (req, res) => {
+app.put('/api/v1/locations/:id', (req, res) => {
   const location = locations[req.params.id];
   if (!location) {
     return res.status(404).json({ error: 'Location not found' });
@@ -116,7 +116,7 @@ app.put('/api/locations/:id', (req, res) => {
 });
 
 // Delete location
-app.delete('/api/locations/:id', (req, res) => {
+app.delete('/api/v1/locations/:id', (req, res) => {
   if (locations[req.params.id]) {
     delete locations[req.params.id];
     res.status(204).send();
@@ -168,7 +168,7 @@ app.listen(PORT, () => {
 
 3. In your browser, go to `http://localhost:3002`
 
-4. Click the "Get Location" button on the right sidebar
+4. Click the "Check in" button on the main page
 
 5. Grant location permission when prompted
 
@@ -222,7 +222,7 @@ CREATE INDEX idx_locations_timestamp ON locations(timestamp DESC);
 - Verify the backend is returning data correctly
 - Test the API with curl:
   ```bash
-  curl http://localhost:5000/api/locations
+  curl http://localhost:5000/api/v1/locations
   ```
 
 ### Geolocation permission denied

@@ -155,3 +155,16 @@ export async function deleteLocation(id: string): Promise<void> {
     );
   }
 }
+
+export async function deleteAllLocations(batchSize = 20): Promise<number> {
+  const locations = await getAllLocations();
+  let deletedCount = 0;
+
+  for (let i = 0; i < locations.length; i += batchSize) {
+    const chunk = locations.slice(i, i + batchSize);
+    await Promise.all(chunk.map((location) => deleteLocation(location.id)));
+    deletedCount += chunk.length;
+  }
+
+  return deletedCount;
+}

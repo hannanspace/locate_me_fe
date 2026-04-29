@@ -26,7 +26,7 @@
 ┌──────────▼──────────┐
 │  Backend (5000)     │
 │  ┌───────────────┐  │
-│  │ /api/locations│
+│  │ /api/v1/locations│
 │  │   Endpoints   │  │
 │  └───────────────┘  │
 │  ┌───────────────┐  │
@@ -40,7 +40,7 @@
 ### 1. Creating a Location
 
 ```
-User taps "Get Location" button
+User taps "Check in" button
     ↓
 Geolocation API triggered
     ↓
@@ -48,10 +48,10 @@ Browser prompts for permission
     ↓
 Permission granted → GPS coordinates captured
     ↓
-handleLocateMe() in page.tsx called
+handleCheckIn() in page.tsx called
     ↓
-POST /api/locations sent to backend
-    Body: { latitude, longitude, accuracy, timestamp, description }
+POST /api/v1/locations sent to backend
+    Body: { latitude, longitude, accuracy, timestamp, country, state, description }
     ↓
 Backend stores location in database
     ↓
@@ -74,9 +74,9 @@ Toast notification shows success
 ```
 Page loads (useEffect)
     ↓
-getLocations() API call
+getAllLocations() API call
     ↓
-GET /api/locations from backend
+GET /api/v1/locations from backend (paginated loop)
     ↓
 Backend returns paginated locations
     ↓
@@ -92,22 +92,21 @@ Map auto-centers on first location (if exists)
 ## Component Communication
 
 ### page.tsx (Main Controller)
-- Manages all state (locations, stats, isLocating)
-- Handles geolocation permission flow
+- Manages location and check-in state
+- Handles geolocation + reverse geocoding flow
 - Coordinates API calls with backend
 - Passes data down to child components
 
-### LocationTracker (Right Sidebar)
-- Displays statistics
-- Shows "Get Location" button
-- Receives props: `isLocating`, `stats`, `onLocateMe`
-- No direct backend communication
+### Main Page UI
+- Displays map, past 10 locations, total by state, and check-in button
+- Guards duplicate check-ins with sessionStorage + cookie
+- No direct backend communication outside page-level handlers
 
 ### MapView (Left Side)
 - Displays map and markers
 - Renders markers from `locations` prop
 - Shows location details in popups
-- Has its own "Locate Me" button (can be hidden)
+- Renders all fetched locations as markers
 
 ### api.ts (API Client)
 - Abstracts HTTP communication
@@ -136,7 +135,7 @@ Why `NEXT_PUBLIC_` prefix?
 export async function sendLocation(payload: LocationPayload): Promise<Location> {
   const beUrl = getBeUrl(); // Gets from NEXT_PUBLIC_BE_URL
   
-  const response = await fetch(`${beUrl}/api/locations`, {
+  const response = await fetch(`${beUrl}/api/v1/locations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -152,23 +151,21 @@ export async function sendLocation(payload: LocationPayload): Promise<Location> 
 ```typescript
 // page.tsx
 const [locations, setLocations] = useState<Location[]>([]);
-const [stats, setStats] = useState({...});
+const [isCheckingIn, setIsCheckingIn] = useState(false);
 
 // On load: fetch existing locations
 useEffect(() => {
-  const data = await getLocations();
-  setLocations(data.locations);
+  const data = await getAllLocations();
+  setLocations(data);
 }, []);
 
-// On locate: create new location
-const handleLocateMe = async () => {
-  const result = await fetch(`${beUrl}/api/locations`, {
-    method: "POST",
-    body: JSON.stringify({ latitude, longitude, ... })
+// On check-in: create new location
+const handleCheckIn = async () => {
+  const geocode = await reverseGeocode(latitude, longitude);
+  const newLocation = await sendLocation({
+    latitude, longitude, country: geocode.country, state: geocode.state, ...
   });
-  
-  const newLocation = await result.json();
-  setLocations(prev => [newLocation, ...prev]); // Add to beginning
+  setLocations(prev => [newLocation, ...prev]); // Add newest first
 };
 ```
 
@@ -205,7 +202,7 @@ const handleLocateMe = async () => {
 ### Pagination
 ```typescript
 // Fetch with limit/offset to avoid huge transfers
-const data = await getLocations(50, 0); // First 50 locations
+const data = await getAllLocations(); // Fetches all pages
 ```
 
 ### Lazy Loading
@@ -228,15 +225,15 @@ setLocations(prev => [newLocation, ...prev]);
 ### Manual Testing
 
 1. **Create Location**
-   - Click "Get Location" button
+   - Click "Check in" button
    - Check browser DevTools → Network tab
-   - Verify POST request to `/api/locations`
+   - Verify POST request to `/api/v1/locations`
    - Verify response has id, latitude, longitude
    - Check marker appears on map
 
 2. **Load Locations**
    - Refresh page
-   - Check Network tab for GET `/api/locations`
+   - Check Network tab for GET `/api/v1/locations`
    - Verify all markers appear on map
 
 3. **Error Cases**
@@ -248,7 +245,7 @@ setLocations(prev => [newLocation, ...prev]);
 
 ```bash
 # Create location
-curl -X POST http://localhost:5000/api/locations \
+curl -X POST http://localhost:5000/api/v1/locations \
   -H "Content-Type: application/json" \
   -d '{
     "latitude": 3.1390,
@@ -258,10 +255,10 @@ curl -X POST http://localhost:5000/api/locations \
   }'
 
 # Get all locations
-curl http://localhost:5000/api/locations
+curl http://localhost:5000/api/v1/locations
 
 # Delete location
-curl -X DELETE http://localhost:5000/api/locations/loc_123456
+curl -X DELETE http://localhost:5000/api/v1/locations/loc_123456
 ```
 
 ## Deployment Checklist
