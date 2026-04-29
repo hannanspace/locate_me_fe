@@ -1,216 +1,195 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import MapViewWrapper from '@/components/MapViewWrapper';
-import LocationTracker from '@/components/LocationTracker';
-import LocationForm from '@/components/LocationForm';
-import { getLocations, Location } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { getAllLocations, Location, reverseGeocode, sendLocation } from '@/lib/api';
+import { MapPin, List, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-type UserState = 'idle' | 'locating' | 'located' | 'error';
-
-interface Stats {
-  locationsFound: number;
-  distanceTraveled: number;
-  timeElapsed: number;
-  accuracy: number;
-  successCount: number;
-  failureCount: number;
-  averageAccuracy: number;
-  sessionDuration: number;
-}
+const CHECKIN_COOKIE_KEY = 'locate_me_checked_in';
+const CHECKIN_SESSION_KEY = 'locate_me_checked_in';
 
 export default function Home() {
-  const [isLocating, setIsLocating] = useState(false);
-  const [userState, setUserState] = useState<UserState>('idle');
+  const [isCheckingIn, setIsCheckingIn] = useState(false);
+  const [hasCheckedIn, setHasCheckedIn] = useState(false);
   const [locations, setLocations] = useState<Location[]>([]);
-  const [accuracyHistory, setAccuracyHistory] = useState<number[]>([]);
-  const [showLocationForm, setShowLocationForm] = useState(false);
-  const [pendingLocationData, setPendingLocationData] = useState<{
-    country: string;
-    state: string;
-    description?: string;
-  } | null>(null);
-  const [stats, setStats] = useState<Stats>({
-    locationsFound: 0,
-    distanceTraveled: 0,
-    timeElapsed: 0,
-    accuracy: 0,
-    successCount: 0,
-    failureCount: 0,
-    averageAccuracy: 0,
-    sessionDuration: 0,
-  });
 
-  // Fetch locations on mount
   useEffect(() => {
     const fetchLocations = async () => {
       try {
-        const data = await getLocations();
-        setLocations(data.locations);
-        setStats((prev) => ({
-          ...prev,
-          locationsFound: data.total,
-        }));
+        const allLocations = await getAllLocations();
+        setLocations(allLocations);
       } catch (err) {
         console.error('Failed to fetch locations:', err);
+        toast.error('Failed to load locations');
       }
     };
 
     fetchLocations();
   }, []);
 
-  // Timer for elapsed time
   useEffect(() => {
-    const timer = setInterval(() => {
-      setStats((prev) => ({
-        ...prev,
-        timeElapsed: prev.timeElapsed + 1,
-        sessionDuration: prev.sessionDuration + 1,
-      }));
-    }, 1000);
-
-    return () => clearInterval(timer);
+    const sessionValue = sessionStorage.getItem(CHECKIN_SESSION_KEY);
+    const cookieValue = document.cookie
+      .split('; ')
+      .find((cookie) => cookie.startsWith(`${CHECKIN_COOKIE_KEY}=`));
+    setHasCheckedIn(Boolean(sessionValue || cookieValue));
   }, []);
 
-  const calculateAverageAccuracy = (accuracies: number[]) => {
-    if (accuracies.length === 0) return 0;
-    const sum = accuracies.reduce((a, b) => a + b, 0);
-    return Math.round(sum / accuracies.length);
+  const markCheckedIn = () => {
+    sessionStorage.setItem(CHECKIN_SESSION_KEY, 'true');
+    // This cookie keeps the guard active for the current browser session.
+    document.cookie = `${CHECKIN_COOKIE_KEY}=true; path=/; SameSite=Lax`;
+    setHasCheckedIn(true);
   };
 
-  const handleLocateMe = () => {
-    // Show location form first
-    setShowLocationForm(true);
-  };
-
-  const handleLocationFormSubmit = async (data: {
-    country: string;
-    state: string;
-    description?: string;
-  }) => {
-    setShowLocationForm(false);
-    setPendingLocationData(data);
-    setIsLocating(true);
-    setUserState('locating');
-
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const { latitude, longitude, accuracy } = position.coords;
-          const roundedAccuracy = Math.round(accuracy);
-
-          try {
-            const result = await fetch(
-              `${process.env.NEXT_PUBLIC_BE_URL}/api/locations`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  latitude,
-                  longitude,
-                  accuracy: roundedAccuracy,
-                  timestamp: new Date().toISOString(),
-                  country: data.country,
-                  state: data.state,
-                  description: data.description || 'User location',
-                }),
-              }
-            );
-
-            if (result.ok) {
-              const newLocation = await result.json();
-              setLocations((prev) => [newLocation, ...prev]);
-
-              // Update accuracy history
-              const newAccuracyHistory = [roundedAccuracy, ...accuracyHistory];
-              setAccuracyHistory(newAccuracyHistory);
-
-              const newAverageAccuracy = calculateAverageAccuracy(newAccuracyHistory);
-
-              setStats((prev) => ({
-                ...prev,
-                locationsFound: prev.locationsFound + 1,
-                accuracy: roundedAccuracy,
-                averageAccuracy: newAverageAccuracy,
-                successCount: prev.successCount + 1,
-              }));
-
-              setUserState('located');
-              toast.success(`Location saved in ${data.state}, ${data.country}!`);
-
-              // Reset to idle after 2 seconds
-              setTimeout(() => {
-                setUserState('idle');
-              }, 2000);
-            } else {
-              throw new Error('Failed to save location');
-            }
-          } catch (err) {
-            console.error('Error:', err);
-            setStats((prev) => ({
-              ...prev,
-              failureCount: prev.failureCount + 1,
-            }));
-            setUserState('error');
-            toast.error('Error saving location');
-
-            // Reset to idle after 2 seconds
-            setTimeout(() => {
-              setUserState('idle');
-            }, 2000);
-          }
-
-          setIsLocating(false);
-          setPendingLocationData(null);
-        },
-        (error) => {
-          console.error('Geolocation error:', error);
-          setStats((prev) => ({
-            ...prev,
-            failureCount: prev.failureCount + 1,
-          }));
-          setUserState('error');
-          toast.error('Failed to get location');
-
-          // Reset to idle after 2 seconds
-          setTimeout(() => {
-            setUserState('idle');
-          }, 2000);
-
-          setIsLocating(false);
-          setPendingLocationData(null);
-        }
-      );
+  const handleCheckIn = async () => {
+    if (hasCheckedIn || isCheckingIn) {
+      return;
     }
+
+    if (!('geolocation' in navigator)) {
+      toast.error('Geolocation is not supported in this browser');
+      return;
+    }
+
+    setIsCheckingIn(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        const roundedAccuracy = Math.round(accuracy);
+
+        try {
+          const geocode = await reverseGeocode(latitude, longitude);
+          const payload = {
+            latitude,
+            longitude,
+            accuracy: roundedAccuracy,
+            timestamp: new Date().toISOString(),
+            country: geocode.country,
+            state: geocode.state,
+            description: 'User check-in',
+          };
+
+          const createdLocation = await sendLocation(payload);
+          setLocations((prev) => [createdLocation, ...prev]);
+          markCheckedIn();
+          toast.success(`Checked in at ${geocode.state}, ${geocode.country}`);
+        } catch (error) {
+          console.error('Check-in failed:', error);
+          toast.error('Check-in failed. Please try again.');
+        } finally {
+          setIsCheckingIn(false);
+        }
+      },
+      (error) => {
+        console.error('Geolocation error:', error);
+        setIsCheckingIn(false);
+        toast.error('Unable to get your location');
+      }
+    );
   };
+
+  const recentLocations = useMemo(() => locations.slice(0, 10), [locations]);
+
+  const stateTotals = useMemo(() => {
+    const counts = locations.reduce<Record<string, number>>((acc, location) => {
+      const stateName = location.state || 'Unknown State';
+      acc[stateName] = (acc[stateName] || 0) + 1;
+      return acc;
+    }, {});
+
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [locations]);
 
   return (
-    <main className="h-[100dvh] w-full overflow-hidden flex">
-      {/* Left side - Map */}
-      <div className="flex-1 h-full">
-        <MapViewWrapper locations={locations} />
-      </div>
+    <main className="min-h-[100dvh] w-full bg-slate-950 p-4 md:p-6">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
+        <section className="rounded-xl border border-white/10 bg-slate-900/60 p-3">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-blue-200">
+            <MapPin className="h-4 w-4" />
+            Map
+          </h2>
+          <div className="h-[45dvh] overflow-hidden rounded-lg border border-white/10">
+            <MapViewWrapper locations={locations} />
+          </div>
+        </section>
 
-      {/* Right side - Controls */}
-      <div className="w-96 h-full bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 border-l border-white/10 overflow-y-auto">
-        <LocationTracker
-          isLocating={isLocating}
-          userState={userState}
-          stats={stats}
-          locations={locations}
-          onLocateMe={handleLocateMe}
-        />
-      </div>
+        <section className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-blue-200">
+              <List className="h-4 w-4" />
+              Past 10 Locations
+            </h2>
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+              {recentLocations.length === 0 ? (
+                <p className="text-sm text-slate-300">No check-ins yet.</p>
+              ) : (
+                recentLocations.map((location) => (
+                  <div
+                    key={location.id}
+                    className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-slate-200"
+                  >
+                    <p className="font-medium text-white">
+                      {location.state}, {location.country}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {new Date(location.timestamp).toLocaleString()}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
 
-      {/* Location Form Modal */}
-      {showLocationForm && (
-        <LocationForm
-          onSubmit={handleLocationFormSubmit}
-          onCancel={() => setShowLocationForm(false)}
-          isLoading={isLocating}
-        />
-      )}
+          <div className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-blue-200">
+              <Building2 className="h-4 w-4" />
+              Total by State
+            </h2>
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+              {stateTotals.length === 0 ? (
+                <p className="text-sm text-slate-300">No state data available yet.</p>
+              ) : (
+                stateTotals.map(([stateName, count]) => (
+                  <div
+                    key={stateName}
+                    className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
+                  >
+                    <span className="text-slate-200">{stateName}</span>
+                    <span className="rounded-full bg-blue-500/30 px-3 py-1 font-semibold text-blue-100">
+                      {count}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-blue-200">
+            Check In
+          </h2>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-300">
+              Use this button to save your current location once per session.
+            </p>
+            <Button
+              onClick={handleCheckIn}
+              disabled={isCheckingIn || hasCheckedIn}
+              className="bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              {isCheckingIn ? 'Checking in...' : hasCheckedIn ? 'Checked in' : 'Check in'}
+            </Button>
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

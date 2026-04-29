@@ -40,7 +40,7 @@ const getBeUrl = () => {
 export async function sendLocation(payload: LocationPayload): Promise<Location> {
   const beUrl = getBeUrl();
 
-  const response = await fetch(`${beUrl}/api/locations`, {
+  const response = await fetch(`${beUrl}/api/v1/locations`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -58,11 +58,49 @@ export async function sendLocation(payload: LocationPayload): Promise<Location> 
   return response.json();
 }
 
+interface ReverseGeocodeResponse {
+  address?: {
+    country?: string;
+    state?: string;
+    region?: string;
+    county?: string;
+  };
+}
+
+export async function reverseGeocode(latitude: number, longitude: number): Promise<{
+  country: string;
+  state: string;
+}> {
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Reverse geocoding failed with status ${response.status}`);
+  }
+
+  const data: ReverseGeocodeResponse = await response.json();
+  const country = data.address?.country || "Unknown Country";
+  const state =
+    data.address?.state ||
+    data.address?.region ||
+    data.address?.county ||
+    "Unknown State";
+
+  return { country, state };
+}
+
 export async function getLocations(limit = 50, offset = 0): Promise<LocationsResponse> {
   const beUrl = getBeUrl();
 
   const response = await fetch(
-    `${beUrl}/api/locations?limit=${limit}&offset=${offset}`,
+    `${beUrl}/api/v1/locations?limit=${limit}&offset=${offset}`,
     {
       method: "GET",
       headers: {
@@ -81,10 +119,29 @@ export async function getLocations(limit = 50, offset = 0): Promise<LocationsRes
   return response.json();
 }
 
+export async function getAllLocations(pageSize = 200): Promise<Location[]> {
+  const allLocations: Location[] = [];
+  let offset = 0;
+  let total = 0;
+
+  do {
+    const page = await getLocations(pageSize, offset);
+    allLocations.push(...page.locations);
+    total = page.total;
+    offset += page.locations.length;
+
+    if (page.locations.length === 0) {
+      break;
+    }
+  } while (offset < total);
+
+  return allLocations;
+}
+
 export async function deleteLocation(id: string): Promise<void> {
   const beUrl = getBeUrl();
 
-  const response = await fetch(`${beUrl}/api/locations/${id}`, {
+  const response = await fetch(`${beUrl}/api/v1/locations/${id}`, {
     method: "DELETE",
     headers: {
       "Content-Type": "application/json",
