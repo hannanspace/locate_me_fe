@@ -1,27 +1,83 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import MapViewWrapper from '@/components/MapViewWrapper';
 import { Button } from '@/components/ui/button';
 import { getAllLocations, Location, reverseGeocode, sendLocation } from '@/lib/api';
+import {
+  extractInsertedLocation,
+  getRealtimeWsUrl,
+  toJsonPayload,
+} from '@/lib/locationRealtime';
 import { MapPin, List, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const CHECKIN_COOKIE_KEY = 'locate_me_checked_in';
 const CHECKIN_SESSION_KEY = 'locate_me_checked_in';
+type RealtimeStatus = 'connecting' | 'connected' | 'disconnected';
 
 export default function Home() {
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [hasCheckedIn, setHasCheckedIn] = useState(false);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>('connecting');
+  const knownLocationIdsRef = useRef<Set<string>>(new Set());
+  const hasLoadedInitialLocationsRef = useRef(false);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const isSyncingLocationsRef = useRef(false);
+
+  const prependLocationIfMissing = (nextLocation: Location, showToast = true) => {
+    const locationId = String(nextLocation.id);
+    if (knownLocationIdsRef.current.has(locationId)) {
+      return;
+    }
+
+    knownLocationIdsRef.current.add(locationId);
+    setLocations((prev) => [nextLocation, ...prev]);
+
+    if (showToast) {
+      toast.success('New location inserted');
+    }
+  };
+
+  const syncLocationsFromApi = async () => {
+    if (isSyncingLocationsRef.current) {
+      return;
+    }
+
+    isSyncingLocationsRef.current = true;
+    try {
+      const allLocations = await getAllLocations();
+      knownLocationIdsRef.current = new Set(
+        allLocations.map((location) => String(location.id))
+      );
+      hasLoadedInitialLocationsRef.current = true;
+      setLocations(allLocations);
+    } catch (err) {
+      console.error('Failed to sync locations:', err);
+    } finally {
+      isSyncingLocationsRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const sessionValue = sessionStorage.getItem(CHECKIN_SESSION_KEY);
+      const cookieValue = document.cookie
+        .split('; ')
+        .find((cookie) => cookie.startsWith(`${CHECKIN_COOKIE_KEY}=`));
+      setHasCheckedIn(Boolean(sessionValue || cookieValue));
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
 
   useEffect(() => {
     const fetchLocations = async () => {
-      try {
-        const allLocations = await getAllLocations();
-        setLocations(allLocations);
-      } catch (err) {
-        console.error('Failed to fetch locations:', err);
+      await syncLocationsFromApi();
+      if (!hasLoadedInitialLocationsRef.current) {
         toast.error('Failed to load locations');
       }
     };
@@ -30,11 +86,74 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const sessionValue = sessionStorage.getItem(CHECKIN_SESSION_KEY);
-    const cookieValue = document.cookie
-      .split('; ')
-      .find((cookie) => cookie.startsWith(`${CHECKIN_COOKIE_KEY}=`));
-    setHasCheckedIn(Boolean(sessionValue || cookieValue));
+    let socket: WebSocket | null = null;
+    let isUnmounted = false;
+
+    const clearReconnectTimer = () => {
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+
+    const connect = () => {
+      if (isUnmounted) {
+        return;
+      }
+
+      let wsUrl = '';
+      try {
+        wsUrl = getRealtimeWsUrl();
+      } catch (error) {
+        console.error('WebSocket configuration error:', error);
+        setRealtimeStatus('disconnected');
+        return;
+      }
+
+      setRealtimeStatus('connecting');
+      socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        setRealtimeStatus('connected');
+      };
+
+      socket.onmessage = (event) => {
+        const payload = toJsonPayload(String(event.data));
+        const insertedLocation = extractInsertedLocation(payload);
+
+        if (!insertedLocation) {
+          // Fallback sync covers unexpected backend envelope variations.
+          void syncLocationsFromApi();
+          return;
+        }
+
+        prependLocationIfMissing(insertedLocation, hasLoadedInitialLocationsRef.current);
+      };
+
+      socket.onclose = () => {
+        if (isUnmounted) {
+          return;
+        }
+
+        setRealtimeStatus('disconnected');
+        clearReconnectTimer();
+        reconnectTimerRef.current = window.setTimeout(() => {
+          connect();
+        }, 2000);
+      };
+
+      socket.onerror = () => {
+        setRealtimeStatus('disconnected');
+      };
+    };
+
+    connect();
+
+    return () => {
+      isUnmounted = true;
+      clearReconnectTimer();
+      socket?.close();
+    };
   }, []);
 
   const markCheckedIn = () => {
@@ -74,7 +193,7 @@ export default function Home() {
           };
 
           const createdLocation = await sendLocation(payload);
-          setLocations((prev) => [createdLocation, ...prev]);
+          prependLocationIfMissing(createdLocation, false);
           markCheckedIn();
           toast.success(`Checked in at ${geocode.state}, ${geocode.country}`);
         } catch (error) {
@@ -108,10 +227,23 @@ export default function Home() {
     <main className="min-h-[100dvh] w-full bg-slate-950 p-4 md:p-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
         <section className="rounded-xl border border-white/10 bg-slate-900/60 p-3">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-blue-200">
-            <MapPin className="h-4 w-4" />
-            Map
-          </h2>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-blue-200">
+              <MapPin className="h-4 w-4" />
+              Map
+            </h2>
+            <span
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                realtimeStatus === 'connected'
+                  ? 'bg-emerald-500/20 text-emerald-300'
+                  : realtimeStatus === 'connecting'
+                  ? 'bg-amber-500/20 text-amber-300'
+                  : 'bg-rose-500/20 text-rose-300'
+              }`}
+            >
+              Live: {realtimeStatus}
+            </span>
+          </div>
           <div className="h-[45dvh] overflow-hidden rounded-lg border border-white/10">
             <MapViewWrapper locations={locations} />
           </div>
