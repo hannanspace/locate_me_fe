@@ -1,57 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import {
   MapContainer,
   TileLayer,
   Marker,
   Popup,
-  useMap,
 } from "react-leaflet";
 import L from "leaflet";
 import { Location } from "@/lib/api";
 
-const defaultIcon = L.icon({
-  iconUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
+const humanIcon = L.divIcon({
+  html: '<div class="text-2xl leading-none">🧍</div>',
+  className: "human-marker-icon",
+  iconSize: [24, 24],
+  iconAnchor: [12, 20],
+  popupAnchor: [0, -20],
 });
-L.Marker.mergeOptions({ icon: defaultIcon });
 
 const MALAYSIA_CENTER: [number, number] = [3.0, 110.0];
 const DEFAULT_ZOOM = 5;
 
-function FlyToLocation({ position }: { position: [number, number] | null }) {
-  const map = useMap();
-  useEffect(() => {
-    if (position) {
-      map.flyTo(position, 15, { animate: true, duration: 1.5 });
-    }
-  }, [map, position]);
-  return null;
-}
-
 export default function MapView({ locations = [] }: { locations: Location[] }) {
-  const [userPosition, setUserPosition] = useState<[number, number] | null>(
-    null
-  );
-
-  // Fly to first location on mount
-  useEffect(() => {
-    if (locations.length > 0) {
-      const [lat, lng] = [locations[0].latitude, locations[0].longitude];
-      setUserPosition([lat, lng]);
-    }
-  }, [locations]);
-
-
   return (
     <div className="relative h-full w-full">
       <MapContainer
@@ -71,7 +40,7 @@ export default function MapView({ locations = [] }: { locations: Location[] }) {
           <Marker
             key={location.id}
             position={[location.latitude, location.longitude]}
-            icon={defaultIcon}
+            icon={humanIcon}
           >
             <Popup>
               <div className="text-sm">
@@ -84,14 +53,6 @@ export default function MapView({ locations = [] }: { locations: Location[] }) {
             </Popup>
           </Marker>
         ))}
-
-        {/* Current user position */}
-        {userPosition && (
-          <>
-            <Marker position={userPosition} icon={defaultIcon} />
-            <FlyToLocation position={userPosition} />
-          </>
-        )}
       </MapContainer>
 
     </div>

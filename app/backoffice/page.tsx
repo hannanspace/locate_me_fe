@@ -18,11 +18,11 @@ type CoordinateRange = {
   lngMax: number;
 };
 
-const MALAYSIA_COORDINATE_RANGE: CoordinateRange = {
-  latMin: 0.85,
-  latMax: 7.4,
-  lngMin: 99.6,
-  lngMax: 119.5,
+type UrbanSeed = {
+  name: string;
+  state: string;
+  latitude: number;
+  longitude: number;
 };
 
 const MALAYSIA_STATES = [
@@ -43,6 +43,40 @@ const MALAYSIA_STATES = [
   'Putrajaya',
 ];
 
+const MALAYSIA_URBAN_SEEDS: UrbanSeed[] = [
+  { name: 'Kuala Lumpur', state: 'Kuala Lumpur', latitude: 3.139, longitude: 101.6869 },
+  { name: 'Shah Alam', state: 'Selangor', latitude: 3.0738, longitude: 101.5183 },
+  { name: 'Petaling Jaya', state: 'Selangor', latitude: 3.1073, longitude: 101.6067 },
+  { name: 'Johor Bahru', state: 'Johor', latitude: 1.4927, longitude: 103.7414 },
+  { name: 'George Town', state: 'Pulau Pinang', latitude: 5.4141, longitude: 100.3288 },
+  { name: 'Ipoh', state: 'Perak', latitude: 4.5975, longitude: 101.0901 },
+  { name: 'Kuantan', state: 'Pahang', latitude: 3.8077, longitude: 103.326 },
+  { name: 'Kota Bharu', state: 'Kelantan', latitude: 6.1254, longitude: 102.2381 },
+  { name: 'Kuala Terengganu', state: 'Terengganu', latitude: 5.3292, longitude: 103.1369 },
+  { name: 'Seremban', state: 'Negeri Sembilan', latitude: 2.7297, longitude: 101.9381 },
+  { name: 'Melaka City', state: 'Melaka', latitude: 2.1896, longitude: 102.2501 },
+  { name: 'Kuching', state: 'Sarawak', latitude: 1.5533, longitude: 110.3592 },
+  { name: 'Miri', state: 'Sarawak', latitude: 4.3995, longitude: 113.9914 },
+  { name: 'Kota Kinabalu', state: 'Sabah', latitude: 5.9804, longitude: 116.0735 },
+  { name: 'Sandakan', state: 'Sabah', latitude: 5.8388, longitude: 118.1171 },
+  { name: 'Kangar', state: 'Perlis', latitude: 6.4449, longitude: 100.1986 },
+];
+
+const FORBIDDEN_LOCATION_TOKENS = [
+  'forest',
+  'wood',
+  'nature_reserve',
+  'water',
+  'reservoir',
+  'river',
+  'stream',
+  'wetland',
+  'beach',
+  'sea',
+  'ocean',
+  'island',
+];
+
 const randomBetween = (min: number, max: number): number =>
   Math.random() * (max - min) + min;
 
@@ -52,24 +86,113 @@ const randomIntBetween = (min: number, max: number): number =>
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const createRandomLocationPayload = () => {
-  const latitude = randomBetween(
-    MALAYSIA_COORDINATE_RANGE.latMin,
-    MALAYSIA_COORDINATE_RANGE.latMax
+const pickRandomSeed = (): UrbanSeed =>
+  MALAYSIA_URBAN_SEEDS[randomIntBetween(0, MALAYSIA_URBAN_SEEDS.length - 1)];
+
+const jitterUrbanCoordinate = (seed: UrbanSeed): [number, number] => {
+  const radiusKm = randomBetween(0.5, 6);
+  const angleRad = randomBetween(0, Math.PI * 2);
+  const latOffset = (radiusKm / 111) * Math.cos(angleRad);
+  const lngOffset =
+    (radiusKm / (111 * Math.cos((seed.latitude * Math.PI) / 180))) * Math.sin(angleRad);
+
+  return [seed.latitude + latOffset, seed.longitude + lngOffset];
+};
+
+const isForbiddenLocation = (category?: string, type?: string, addresstype?: string): boolean => {
+  const text = `${category || ''} ${type || ''} ${addresstype || ''}`.toLowerCase();
+  return FORBIDDEN_LOCATION_TOKENS.some((token) => text.includes(token));
+};
+
+const hasUrbanAddressSignal = (address?: Record<string, string>): boolean => {
+  if (!address) {
+    return false;
+  }
+
+  return Boolean(
+    address.road ||
+      address.neighbourhood ||
+      address.suburb ||
+      address.city ||
+      address.town ||
+      address.village ||
+      address.hamlet
   );
-  const longitude = randomBetween(
-    MALAYSIA_COORDINATE_RANGE.lngMin,
-    MALAYSIA_COORDINATE_RANGE.lngMax
-  );
+};
+
+const resolveUrbanPoint = async (): Promise<{
+  latitude: number;
+  longitude: number;
+  state: string;
+  cityName: string;
+}> => {
+  const maxRetries = 10;
+
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    const seed = pickRandomSeed();
+    const [latitude, longitude] = jitterUrbanCoordinate(seed);
+
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${latitude}&lon=${longitude}`,
+        {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const data = (await response.json()) as {
+        category?: string;
+        type?: string;
+        addresstype?: string;
+        address?: Record<string, string>;
+      };
+
+      const inMalaysia = (data.address?.country || '').toLowerCase() === 'malaysia';
+      const forbidden = isForbiddenLocation(data.category, data.type, data.addresstype);
+      const urbanSignal = hasUrbanAddressSignal(data.address);
+
+      if (inMalaysia && !forbidden && urbanSignal) {
+        return {
+          latitude,
+          longitude,
+          state: data.address?.state || seed.state,
+          cityName: seed.name,
+        };
+      }
+    } catch {
+      // Continue trying another point.
+    }
+  }
+
+  // Fallback: still generate near urban center if validation retries are exhausted.
+  const fallbackSeed = pickRandomSeed();
+  const [fallbackLat, fallbackLng] = jitterUrbanCoordinate(fallbackSeed);
+  return {
+    latitude: fallbackLat,
+    longitude: fallbackLng,
+    state: fallbackSeed.state,
+    cityName: fallbackSeed.name,
+  };
+};
+
+const createRandomLocationPayload = async () => {
+  const urbanPoint = await resolveUrbanPoint();
 
   return {
-    latitude,
-    longitude,
+    latitude: urbanPoint.latitude,
+    longitude: urbanPoint.longitude,
     accuracy: randomIntBetween(5, 60),
     timestamp: new Date().toISOString(),
     country: 'Malaysia',
-    state: MALAYSIA_STATES[randomIntBetween(0, MALAYSIA_STATES.length - 1)],
-    description: 'Backoffice random seed',
+    state: urbanPoint.state || MALAYSIA_STATES[randomIntBetween(0, MALAYSIA_STATES.length - 1)],
+    description: `Backoffice random seed near ${urbanPoint.cityName}`,
   };
 };
 
@@ -109,7 +232,7 @@ export default function BackofficePage() {
           break;
         }
 
-        const payload = createRandomLocationPayload();
+        const payload = await createRandomLocationPayload();
         await sendLocation(payload);
         setGeneratedCount(index + 1);
 
@@ -174,7 +297,8 @@ export default function BackofficePage() {
         <section className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
           <h2 className="text-base font-semibold text-white">1) Generate random locations</h2>
           <p className="mt-1 text-sm text-slate-300">
-            Inserts one-by-one with random delays between 1 and 4 seconds.
+            Inserts one-by-one with random delays between 1 and 4 seconds, prioritizing urban
+            Malaysia points and skipping forest/water-like areas.
           </p>
           <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
             <label className="text-sm text-slate-300">
