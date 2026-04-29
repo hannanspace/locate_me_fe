@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  locate-me-fe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BE_URL: ${NEXT_PUBLIC_BE_URL:-http://localhost:3001}
+    image: locate-me-fe:local
+    container_name: locate-me-fe
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
