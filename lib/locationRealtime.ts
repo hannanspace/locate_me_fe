@@ -25,7 +25,7 @@ function getWsUrlFromBeUrl(beUrl: string): string {
   return beUrl;
 }
 
-export function getRealtimeWsUrl(): string {
+export function getRealtimeWsUrl(): string | null {
   const explicitWsUrl = process.env.NEXT_PUBLIC_WS_URL;
   if (explicitWsUrl) {
     return explicitWsUrl;
@@ -36,16 +36,8 @@ export function getRealtimeWsUrl(): string {
     return getWsUrlFromBeUrl(beUrl);
   }
 
-  // Same-origin as the app (Dockploy/runtime env often has no NEXT_PUBLIC_* in the client bundle).
-  // Requires the WebSocket to be reachable on the same host (reverse proxy or backend path).
-  if (typeof window !== "undefined") {
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${window.location.host}`;
-  }
-
-  throw new Error(
-    "NEXT_PUBLIC_WS_URL or NEXT_PUBLIC_BE_URL must be configured for realtime updates."
-  );
+  // Realtime is optional. Without explicit configuration, polling still keeps data in sync.
+  return null;
 }
 
 function isLocationLike(value: unknown): value is Location {

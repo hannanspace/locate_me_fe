@@ -184,11 +184,8 @@ export default function Home() {
         return;
       }
 
-      let wsUrl = '';
-      try {
-        wsUrl = getRealtimeWsUrl();
-      } catch (error) {
-        console.error('WebSocket configuration error:', error);
+      const wsUrl = getRealtimeWsUrl();
+      if (!wsUrl) {
         setRealtimeStatus('disconnected');
         return;
       }
