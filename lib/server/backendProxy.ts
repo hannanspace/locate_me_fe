@@ -50,13 +50,29 @@ export async function proxyToBackend(
     init.body = await req.arrayBuffer();
   }
 
-  const upstream = await fetch(url, init);
-  const body = await upstream.text();
-  return new NextResponse(body, {
-    status: upstream.status,
-    headers: {
-      "Content-Type":
-        upstream.headers.get("Content-Type") ?? "application/json",
-    },
-  });
+  try {
+    const upstream = await fetch(url, init);
+    const body = await upstream.text();
+    return new NextResponse(body, {
+      status: upstream.status,
+      headers: {
+        "Content-Type":
+          upstream.headers.get("Content-Type") ?? "application/json",
+        "X-Proxy-Upstream": url,
+      },
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown upstream error";
+
+    return NextResponse.json(
+      {
+        error: "Failed to reach upstream backend.",
+        upstream: url,
+        method: req.method,
+        reason: message,
+      },
+      { status: 502 }
+    );
+  }
 }
