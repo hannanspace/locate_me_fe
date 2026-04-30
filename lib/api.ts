@@ -29,12 +29,25 @@ interface LocationsResponse {
 
 /**
  * Public API base for browser requests.
- * - If `NEXT_PUBLIC_BE_URL` is set (build-time / dev), calls go there directly.
+ * - In production, defaults to same-origin `/api/v1/...` to avoid CORS issues.
+ * - In development, if `NEXT_PUBLIC_BE_URL` is set, calls go there directly.
+ * - Set `NEXT_PUBLIC_API_MODE=direct` to force direct calls in any environment.
  * - Otherwise uses same-origin paths `/api/v1/...` proxied by Next.js (server reads `BE_URL` at runtime — works on Dockploy without rebuild).
  */
 function getPublicApiPrefix(): string {
+  const apiMode = process.env.NEXT_PUBLIC_API_MODE?.trim().toLowerCase();
   const beUrl = process.env.NEXT_PUBLIC_BE_URL?.trim();
-  if (!beUrl) return "";
+  if (!beUrl) {
+    return "";
+  }
+
+  // Production should use same-origin proxy unless explicitly overridden.
+  const forceDirect = apiMode === "direct";
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction && !forceDirect) {
+    return "";
+  }
+
   return beUrl.replace(/\/$/, "");
 }
 
