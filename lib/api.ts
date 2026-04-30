@@ -31,7 +31,7 @@ const getBeUrl = () => {
   const beUrl = process.env.NEXT_PUBLIC_BE_URL;
   if (!beUrl) {
     throw new Error(
-      "NEXT_PUBLIC_BE_URL is not configured. Check your .env.local file."
+      "NEXT_PUBLIC_BE_URL is not configured. Set it in `.env` (local) or your deployment/build environment."
     );
   }
   return beUrl;
