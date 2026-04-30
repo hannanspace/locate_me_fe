@@ -396,7 +396,9 @@ export default function BackofficePage() {
             </p>
             <p>
               Effective WS URL:{' '}
-              <span className="text-white">{getRealtimeWsUrl() ?? '(disabled / polling only)'}</span>
+              <span className="text-white">
+                {getRealtimeWsUrl() ?? '(disabled — no live stream)'}
+              </span>
             </p>
           </div>
           <Button onClick={refreshCount} className="mt-3 bg-slate-700 text-white hover:bg-slate-600">

@@ -33,6 +33,7 @@ export default function Home() {
   const hasLoadedInitialLocationsRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
   const isSyncingLocationsRef = useRef(false);
+  const wsHasConnectedBeforeRef = useRef(false);
 
   const readCheckInGuard = (): boolean => {
     const sessionValue = sessionStorage.getItem(CHECKIN_SESSION_KEY);
@@ -159,16 +160,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      void syncLocationsFromApi(true);
-    }, 5000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, []);
-
-  useEffect(() => {
     let socket: WebSocket | null = null;
     let isUnmounted = false;
 
@@ -195,6 +186,11 @@ export default function Home() {
 
       socket.onopen = () => {
         setRealtimeStatus('connected');
+        // Catch up after reconnect only (initial load is the mount effect; avoid double fetch).
+        if (wsHasConnectedBeforeRef.current) {
+          void syncLocationsFromApi(false);
+        }
+        wsHasConnectedBeforeRef.current = true;
       };
 
       socket.onmessage = (event) => {
