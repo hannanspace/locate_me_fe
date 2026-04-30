@@ -4,6 +4,7 @@
 node_modules
 *.md
 *.log
+.env
 .env.local
 .env.*.local
 .DS_Store
