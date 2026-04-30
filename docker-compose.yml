@@ -7,6 +7,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_BE_URL: ${NEXT_PUBLIC_BE_URL:-http://localhost:3001}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
     image: locate-me-fe:local
     container_name: locate-me-fe
     ports:

@@ -15,8 +15,12 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# NEXT_PUBLIC_* must be present at build time — they are inlined into client bundles.
+# Runtime-only env (e.g. Dockploy "Environment") does not update already-built JS.
 ARG NEXT_PUBLIC_BE_URL
+ARG NEXT_PUBLIC_WS_URL
 ENV NEXT_PUBLIC_BE_URL=${NEXT_PUBLIC_BE_URL}
+ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
 
 RUN npm run build
 
