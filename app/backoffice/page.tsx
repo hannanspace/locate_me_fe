@@ -7,16 +7,12 @@ import { toast } from 'sonner';
 
 const CHECKIN_COOKIE_KEY = 'locate_me_checked_in';
 const CHECKIN_SESSION_KEY = 'locate_me_checked_in';
+const CHECKIN_LOCAL_STORAGE_KEY = 'locate_me_checked_in';
+const CHECKIN_MODE_KEY = 'locate_me_checkin_mode';
+const CHECKIN_COOLDOWN_SECONDS_KEY = 'locate_me_checkin_cooldown_seconds';
 const DEFAULT_GENERATE_COUNT = 20;
 const MIN_DELAY_MS = 1000;
 const MAX_DELAY_MS = 4000;
-
-type CoordinateRange = {
-  latMin: number;
-  latMax: number;
-  lngMin: number;
-  lngMax: number;
-};
 
 type UrbanSeed = {
   name: string;
@@ -62,6 +58,14 @@ const MALAYSIA_URBAN_SEEDS: UrbanSeed[] = [
   { name: 'Kangar', state: 'Perlis', latitude: 6.4449, longitude: 100.1986 },
 ];
 
+const EAST_MALAYSIA_STATES = new Set(['Sabah', 'Sarawak']);
+const PENINSULAR_URBAN_SEEDS = MALAYSIA_URBAN_SEEDS.filter(
+  (seed) => !EAST_MALAYSIA_STATES.has(seed.state)
+);
+const EAST_MALAYSIA_URBAN_SEEDS = MALAYSIA_URBAN_SEEDS.filter((seed) =>
+  EAST_MALAYSIA_STATES.has(seed.state)
+);
+
 const FORBIDDEN_LOCATION_TOKENS = [
   'forest',
   'wood',
@@ -86,8 +90,10 @@ const randomIntBetween = (min: number, max: number): number =>
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const pickRandomSeed = (): UrbanSeed =>
-  MALAYSIA_URBAN_SEEDS[randomIntBetween(0, MALAYSIA_URBAN_SEEDS.length - 1)];
+const pickRandomSeed = (region: 'peninsular' | 'east' = 'peninsular'): UrbanSeed => {
+  const source = region === 'east' ? EAST_MALAYSIA_URBAN_SEEDS : PENINSULAR_URBAN_SEEDS;
+  return source[randomIntBetween(0, source.length - 1)];
+};
 
 const jitterUrbanCoordinate = (seed: UrbanSeed): [number, number] => {
   const radiusKm = randomBetween(0.5, 6);
@@ -120,7 +126,9 @@ const hasUrbanAddressSignal = (address?: Record<string, string>): boolean => {
   );
 };
 
-const resolveUrbanPoint = async (): Promise<{
+const resolveUrbanPoint = async (
+  region: 'peninsular' | 'east' = 'peninsular'
+): Promise<{
   latitude: number;
   longitude: number;
   state: string;
@@ -129,7 +137,7 @@ const resolveUrbanPoint = async (): Promise<{
   const maxRetries = 10;
 
   for (let attempt = 0; attempt < maxRetries; attempt += 1) {
-    const seed = pickRandomSeed();
+    const seed = pickRandomSeed(region);
     const [latitude, longitude] = jitterUrbanCoordinate(seed);
 
     try {
@@ -172,7 +180,7 @@ const resolveUrbanPoint = async (): Promise<{
   }
 
   // Fallback: still generate near urban center if validation retries are exhausted.
-  const fallbackSeed = pickRandomSeed();
+  const fallbackSeed = pickRandomSeed(region);
   const [fallbackLat, fallbackLng] = jitterUrbanCoordinate(fallbackSeed);
   return {
     latitude: fallbackLat,
@@ -182,8 +190,8 @@ const resolveUrbanPoint = async (): Promise<{
   };
 };
 
-const createRandomLocationPayload = async () => {
-  const urbanPoint = await resolveUrbanPoint();
+const createRandomLocationPayload = async (region: 'peninsular' | 'east' = 'peninsular') => {
+  const urbanPoint = await resolveUrbanPoint(region);
 
   return {
     latitude: urbanPoint.latitude,
@@ -196,7 +204,22 @@ const createRandomLocationPayload = async () => {
   };
 };
 
+const buildEastMalaysiaInsertIndexes = (targetCount: number): Set<number> => {
+  if (targetCount < 3) {
+    return new Set();
+  }
+
+  const eastTarget = Math.min(randomIntBetween(1, 2), targetCount);
+  const indexes = new Set<number>();
+  while (indexes.size < eastTarget) {
+    indexes.add(randomIntBetween(0, targetCount - 1));
+  }
+  return indexes;
+};
+
 export default function BackofficePage() {
+  const [userCheckInMode, setUserCheckInMode] = useState<'single' | 'bulk'>('single');
+  const [userCheckInCooldownSeconds, setUserCheckInCooldownSeconds] = useState(30);
   const [targetCount, setTargetCount] = useState(DEFAULT_GENERATE_COUNT);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCount, setGeneratedCount] = useState(0);
@@ -217,6 +240,17 @@ export default function BackofficePage() {
     refreshCount();
   }, []);
 
+  useEffect(() => {
+    const savedMode = localStorage.getItem(CHECKIN_MODE_KEY);
+    const savedCooldown = localStorage.getItem(CHECKIN_COOLDOWN_SECONDS_KEY);
+    if (savedMode === 'single' || savedMode === 'bulk') {
+      setUserCheckInMode(savedMode);
+    }
+    if (savedCooldown) {
+      setUserCheckInCooldownSeconds(Math.max(0, Number(savedCooldown) || 0));
+    }
+  }, []);
+
   const handleGenerateRandomLocations = async () => {
     if (isGenerating || targetCount <= 0) {
       return;
@@ -227,12 +261,15 @@ export default function BackofficePage() {
     stopRequestedRef.current = false;
 
     try {
+      const eastInsertIndexes = buildEastMalaysiaInsertIndexes(targetCount);
+
       for (let index = 0; index < targetCount; index += 1) {
         if (stopRequestedRef.current) {
           break;
         }
 
-        const payload = await createRandomLocationPayload();
+        const region = eastInsertIndexes.has(index) ? 'east' : 'peninsular';
+        const payload = await createRandomLocationPayload(region);
         await sendLocation(payload);
         setGeneratedCount(index + 1);
 
@@ -278,7 +315,16 @@ export default function BackofficePage() {
   const handleClearCurrentUserCookies = () => {
     document.cookie = `${CHECKIN_COOKIE_KEY}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
     sessionStorage.removeItem(CHECKIN_SESSION_KEY);
+    localStorage.removeItem(CHECKIN_LOCAL_STORAGE_KEY);
+    localStorage.setItem('locate_me_checkin_reset_signal', String(Date.now()));
+    localStorage.removeItem('locate_me_checkin_reset_signal');
     toast.success('Current user check-in cookie/session cleared');
+  };
+
+  const handleSaveUserCheckInPolicy = () => {
+    localStorage.setItem(CHECKIN_MODE_KEY, userCheckInMode);
+    localStorage.setItem(CHECKIN_COOLDOWN_SECONDS_KEY, String(userCheckInCooldownSeconds));
+    toast.success('User check-in policy saved');
   };
 
   return (
@@ -297,8 +343,8 @@ export default function BackofficePage() {
         <section className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
           <h2 className="text-base font-semibold text-white">1) Generate random locations</h2>
           <p className="mt-1 text-sm text-slate-300">
-            Inserts one-by-one with random delays between 1 and 4 seconds, prioritizing urban
-            Malaysia points and skipping forest/water-like areas.
+            Inserts one-by-one with random delays between 1 and 4 seconds. Batch mode is heavily
+            biased to Semenanjung Malaysia, with only 1-2 points from Sabah/Sarawak.
           </p>
           <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
             <label className="text-sm text-slate-300">
@@ -352,6 +398,53 @@ export default function BackofficePage() {
             className="mt-3 bg-purple-600 text-white hover:bg-purple-700"
           >
             Clear Check-in Cookie + Session
+          </Button>
+        </section>
+
+        <section className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
+          <h2 className="text-base font-semibold text-white">4) User check-in policy</h2>
+          <p className="mt-1 text-sm text-slate-300">
+            Configure how users can check in on the main page.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => setUserCheckInMode('single')}
+              className={`${
+                userCheckInMode === 'single'
+                  ? 'bg-indigo-600 hover:bg-indigo-700'
+                  : 'bg-slate-700 hover:bg-slate-600'
+              } text-white`}
+            >
+              Single (once only)
+            </Button>
+            <Button
+              onClick={() => setUserCheckInMode('bulk')}
+              className={`${
+                userCheckInMode === 'bulk'
+                  ? 'bg-indigo-600 hover:bg-indigo-700'
+                  : 'bg-slate-700 hover:bg-slate-600'
+              } text-white`}
+            >
+              Bulk (with cooldown)
+            </Button>
+          </div>
+          <label className="mt-3 block text-sm text-slate-300">
+            Cooldown seconds (bulk mode):
+            <input
+              type="number"
+              min={0}
+              value={userCheckInCooldownSeconds}
+              onChange={(event) =>
+                setUserCheckInCooldownSeconds(Math.max(0, Number(event.target.value) || 0))
+              }
+              className="ml-2 w-24 rounded border border-white/20 bg-slate-800 px-2 py-1 text-white"
+            />
+          </label>
+          <Button
+            onClick={handleSaveUserCheckInPolicy}
+            className="mt-3 bg-emerald-600 text-white hover:bg-emerald-700"
+          >
+            Save Check-in Policy
           </Button>
         </section>
       </div>

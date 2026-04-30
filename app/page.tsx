@@ -14,17 +14,43 @@ import { toast } from 'sonner';
 
 const CHECKIN_COOKIE_KEY = 'locate_me_checked_in';
 const CHECKIN_SESSION_KEY = 'locate_me_checked_in';
+const CHECKIN_LOCAL_STORAGE_KEY = 'locate_me_checked_in';
+const CHECKIN_RESET_SIGNAL_KEY = 'locate_me_checkin_reset_signal';
+const CHECKIN_MODE_KEY = 'locate_me_checkin_mode';
+const CHECKIN_COOLDOWN_SECONDS_KEY = 'locate_me_checkin_cooldown_seconds';
 type RealtimeStatus = 'connecting' | 'connected' | 'disconnected';
 
 export default function Home() {
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [hasCheckedIn, setHasCheckedIn] = useState(false);
+  const [checkInMode, setCheckInMode] = useState<'single' | 'bulk'>('single');
+  const [checkInCooldownSeconds, setCheckInCooldownSeconds] = useState(30);
+  const [nextAllowedCheckInAt, setNextAllowedCheckInAt] = useState<number | null>(null);
+  const [cooldownTick, setCooldownTick] = useState(Date.now());
   const [locations, setLocations] = useState<Location[]>([]);
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>('connecting');
   const knownLocationIdsRef = useRef<Set<string>>(new Set());
   const hasLoadedInitialLocationsRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
   const isSyncingLocationsRef = useRef(false);
+
+  const readCheckInGuard = (): boolean => {
+    const sessionValue = sessionStorage.getItem(CHECKIN_SESSION_KEY);
+    const localValue = localStorage.getItem(CHECKIN_LOCAL_STORAGE_KEY);
+    const cookieValue = document.cookie
+      .split('; ')
+      .find((cookie) => cookie.startsWith(`${CHECKIN_COOKIE_KEY}=`));
+    return Boolean(sessionValue || localValue || cookieValue);
+  };
+
+  const readCheckInPolicy = (): { mode: 'single' | 'bulk'; cooldownSeconds: number } => {
+    const mode = localStorage.getItem(CHECKIN_MODE_KEY);
+    const cooldownRaw = localStorage.getItem(CHECKIN_COOLDOWN_SECONDS_KEY);
+    return {
+      mode: mode === 'bulk' ? 'bulk' : 'single',
+      cooldownSeconds: Math.max(0, Number(cooldownRaw) || 30),
+    };
+  };
 
   const prependLocationIfMissing = (nextLocation: Location, showToast = true) => {
     const locationId = String(nextLocation.id);
@@ -80,15 +106,44 @@ export default function Home() {
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      const sessionValue = sessionStorage.getItem(CHECKIN_SESSION_KEY);
-      const cookieValue = document.cookie
-        .split('; ')
-        .find((cookie) => cookie.startsWith(`${CHECKIN_COOKIE_KEY}=`));
-      setHasCheckedIn(Boolean(sessionValue || cookieValue));
+      setHasCheckedIn(readCheckInGuard());
     }, 0);
+
+    const refreshCheckInState = () => {
+      setHasCheckedIn(readCheckInGuard());
+      const nextPolicy = readCheckInPolicy();
+      setCheckInMode(nextPolicy.mode);
+      setCheckInCooldownSeconds(nextPolicy.cooldownSeconds);
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (
+        event.key === CHECKIN_LOCAL_STORAGE_KEY ||
+        event.key === CHECKIN_RESET_SIGNAL_KEY ||
+        event.key === CHECKIN_MODE_KEY ||
+        event.key === CHECKIN_COOLDOWN_SECONDS_KEY
+      ) {
+        refreshCheckInState();
+      }
+    };
+
+    window.addEventListener('focus', refreshCheckInState);
+    window.addEventListener('storage', onStorage);
 
     return () => {
       window.clearTimeout(timeoutId);
+      window.removeEventListener('focus', refreshCheckInState);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setCooldownTick(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
     };
   }, []);
 
@@ -186,13 +241,33 @@ export default function Home() {
 
   const markCheckedIn = () => {
     sessionStorage.setItem(CHECKIN_SESSION_KEY, 'true');
+    localStorage.setItem(CHECKIN_LOCAL_STORAGE_KEY, 'true');
     // This cookie keeps the guard active for the current browser session.
     document.cookie = `${CHECKIN_COOKIE_KEY}=true; path=/; SameSite=Lax`;
     setHasCheckedIn(true);
   };
 
   const handleCheckIn = async () => {
-    if (hasCheckedIn || isCheckingIn) {
+    const currentPolicy = readCheckInPolicy();
+    if (currentPolicy.mode !== checkInMode) {
+      setCheckInMode(currentPolicy.mode);
+    }
+    if (currentPolicy.cooldownSeconds !== checkInCooldownSeconds) {
+      setCheckInCooldownSeconds(currentPolicy.cooldownSeconds);
+    }
+
+    const remainingMs = Math.max(0, (nextAllowedCheckInAt ?? 0) - Date.now());
+    if (currentPolicy.mode === 'bulk' && remainingMs > 0) {
+      toast.info(`Please wait ${Math.ceil(remainingMs / 1000)}s before next check-in`);
+      return;
+    }
+
+    const currentlyCheckedIn = readCheckInGuard();
+    if (currentlyCheckedIn !== hasCheckedIn) {
+      setHasCheckedIn(currentlyCheckedIn);
+    }
+
+    if (isCheckingIn || (currentPolicy.mode === 'single' && currentlyCheckedIn)) {
       return;
     }
 
@@ -222,7 +297,12 @@ export default function Home() {
 
           const createdLocation = await sendLocation(payload);
           prependLocationIfMissing(createdLocation, false);
-          markCheckedIn();
+          if (currentPolicy.mode === 'single') {
+            markCheckedIn();
+          } else {
+            setNextAllowedCheckInAt(Date.now() + currentPolicy.cooldownSeconds * 1000);
+            setHasCheckedIn(false);
+          }
           toast.success(`Checked in at ${geocode.state}, ${geocode.country}`);
         } catch (error) {
           console.error('Check-in failed:', error);
@@ -240,6 +320,11 @@ export default function Home() {
   };
 
   const recentLocations = useMemo(() => locations.slice(0, 10), [locations]);
+  const checkInCooldownRemainingMs = Math.max(0, (nextAllowedCheckInAt ?? 0) - cooldownTick);
+  const isCheckInCooldownActive = checkInMode === 'bulk' && checkInCooldownRemainingMs > 0;
+  const checkInCooldownRemainingSeconds = Math.ceil(checkInCooldownRemainingMs / 1000);
+  const isCheckInDisabled =
+    isCheckingIn || (checkInMode === 'single' ? hasCheckedIn : isCheckInCooldownActive);
 
   const stateTotals = useMemo(() => {
     const counts = locations.reduce<Record<string, number>>((acc, location) => {
@@ -338,14 +423,25 @@ export default function Home() {
           </h2>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-slate-300">
-              Use this button to save your current location once per session.
+              {checkInMode === 'single'
+                ? 'Single mode: user can check in once.'
+                : `Bulk mode: user can check in multiple times with ${checkInCooldownSeconds}s cooldown.`}
+              {isCheckInCooldownActive
+                ? ` Next check-in in ${checkInCooldownRemainingSeconds}s.`
+                : ''}
             </p>
             <Button
               onClick={handleCheckIn}
-              disabled={isCheckingIn || hasCheckedIn}
+              disabled={isCheckInDisabled}
               className="bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
             >
-              {isCheckingIn ? 'Checking in...' : hasCheckedIn ? 'Checked in' : 'Check in'}
+              {isCheckingIn
+                ? 'Checking in...'
+                : checkInMode === 'single' && hasCheckedIn
+                ? 'Checked in'
+                : isCheckInCooldownActive
+                ? `Wait ${checkInCooldownRemainingSeconds}s`
+                : 'Check in'}
             </Button>
           </div>
         </section>
