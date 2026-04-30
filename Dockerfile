@@ -31,6 +31,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# Set at deploy time (e.g. Dockploy): BE_URL=https://your-api.example.com — enables /api/v1 proxy without rebuild.
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs

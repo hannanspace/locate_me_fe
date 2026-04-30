@@ -14,4 +14,6 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
+      # Runtime backend URL for Next.js API proxy (no NEXT_PUBLIC_* rebuild needed):
+      BE_URL: ${BE_URL:-}
     restart: unless-stopped

@@ -27,20 +27,25 @@ interface LocationsResponse {
   offset: number;
 }
 
-const getBeUrl = () => {
-  const beUrl = process.env.NEXT_PUBLIC_BE_URL;
-  if (!beUrl) {
-    throw new Error(
-      "NEXT_PUBLIC_BE_URL is not configured. Set it in `.env` (local) or your deployment/build environment."
-    );
-  }
-  return beUrl;
-};
+/**
+ * Public API base for browser requests.
+ * - If `NEXT_PUBLIC_BE_URL` is set (build-time / dev), calls go there directly.
+ * - Otherwise uses same-origin paths `/api/v1/...` proxied by Next.js (server reads `BE_URL` at runtime — works on Dockploy without rebuild).
+ */
+function getPublicApiPrefix(): string {
+  const beUrl = process.env.NEXT_PUBLIC_BE_URL?.trim();
+  if (!beUrl) return "";
+  return beUrl.replace(/\/$/, "");
+}
+
+function apiPath(segments: string): string {
+  const path = segments.startsWith("/") ? segments : `/${segments}`;
+  const prefix = getPublicApiPrefix();
+  return prefix ? `${prefix}${path}` : path;
+}
 
 export async function sendLocation(payload: LocationPayload): Promise<Location> {
-  const beUrl = getBeUrl();
-
-  const response = await fetch(`${beUrl}/api/v1/locations`, {
+  const response = await fetch(apiPath("/api/v1/locations"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -97,10 +102,8 @@ export async function reverseGeocode(latitude: number, longitude: number): Promi
 }
 
 export async function getLocations(limit = 50, offset = 0): Promise<LocationsResponse> {
-  const beUrl = getBeUrl();
-
   const response = await fetch(
-    `${beUrl}/api/v1/locations?limit=${limit}&offset=${offset}`,
+    `${apiPath("/api/v1/locations")}?limit=${limit}&offset=${offset}`,
     {
       method: "GET",
       headers: {
@@ -139,14 +142,15 @@ export async function getAllLocations(pageSize = 200): Promise<Location[]> {
 }
 
 export async function deleteLocation(id: string): Promise<void> {
-  const beUrl = getBeUrl();
-
-  const response = await fetch(`${beUrl}/api/v1/locations/${id}`, {
-    method: "DELETE",
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
+  const response = await fetch(
+    apiPath(`/api/v1/locations/${encodeURIComponent(id)}`),
+    {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  );
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "Unknown error");
