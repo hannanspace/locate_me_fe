@@ -25,8 +25,17 @@ function getWsUrlFromBeUrl(beUrl: string): string {
   return beUrl;
 }
 
+function getWsUrlFromWindowLocation(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}`;
+}
+
 export function getRealtimeWsUrl(): string | null {
-  const explicitWsUrl = process.env.NEXT_PUBLIC_WS_URL;
+  const explicitWsUrl = process.env.NEXT_PUBLIC_WS_URL?.trim();
   if (explicitWsUrl) {
     return explicitWsUrl;
   }
@@ -36,22 +45,26 @@ export function getRealtimeWsUrl(): string | null {
     return getWsUrlFromBeUrl(beUrl);
   }
 
-  // Realtime is optional. Without explicit configuration, polling still keeps data in sync.
-  return null;
+  // Production-safe fallback: try same-origin websocket endpoint.
+  // This keeps realtime working when FE uses API proxy mode and no public BE URL is set.
+  return getWsUrlFromWindowLocation();
 }
 
 export function getRealtimeDebugConfig(): {
   nextPublicWsUrl: string | null;
   derivedFromBeUrl: string | null;
+  derivedFromWindow: string | null;
   effectiveWsUrl: string | null;
 } {
   const nextPublicWsUrl = process.env.NEXT_PUBLIC_WS_URL?.trim() || null;
   const beUrl = process.env.NEXT_PUBLIC_BE_URL?.trim() || null;
   const derivedFromBeUrl = beUrl ? getWsUrlFromBeUrl(beUrl) : null;
+  const derivedFromWindow = getWsUrlFromWindowLocation();
   return {
     nextPublicWsUrl,
     derivedFromBeUrl,
-    effectiveWsUrl: nextPublicWsUrl ?? derivedFromBeUrl,
+    derivedFromWindow,
+    effectiveWsUrl: nextPublicWsUrl ?? derivedFromBeUrl ?? derivedFromWindow,
   };
 }
 
