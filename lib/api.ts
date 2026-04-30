@@ -44,6 +44,19 @@ function apiPath(segments: string): string {
   return prefix ? `${prefix}${path}` : path;
 }
 
+export function getApiDebugConfig(): {
+  nextPublicBeUrl: string | null;
+  effectiveApiPrefix: string;
+  mode: "direct" | "proxy";
+} {
+  const effectiveApiPrefix = getPublicApiPrefix();
+  return {
+    nextPublicBeUrl: process.env.NEXT_PUBLIC_BE_URL?.trim() || null,
+    effectiveApiPrefix,
+    mode: effectiveApiPrefix ? "direct" : "proxy",
+  };
+}
+
 export async function sendLocation(payload: LocationPayload): Promise<Location> {
   const response = await fetch(apiPath("/api/v1/locations"), {
     method: "POST",

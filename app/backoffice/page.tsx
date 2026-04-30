@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { deleteAllLocations, getAllLocations, sendLocation } from '@/lib/api';
+import { getRealtimeWsUrl } from '@/lib/locationRealtime';
 import { toast } from 'sonner';
 
 const CHECKIN_COOKIE_KEY = 'locate_me_checked_in';
@@ -19,6 +20,21 @@ type UrbanSeed = {
   state: string;
   latitude: number;
   longitude: number;
+};
+
+type RuntimeConfigResponse = {
+  client: {
+    nextPublicBeUrl: string | null;
+    effectiveApiPrefix: string;
+    mode: 'direct' | 'proxy';
+    nextPublicWsUrl: string | null;
+    derivedFromBeUrl: string | null;
+    effectiveWsUrl: string | null;
+  };
+  server: {
+    beUrl: string | null;
+    proxyMode: boolean;
+  };
 };
 
 const MALAYSIA_STATES = [
@@ -225,6 +241,7 @@ export default function BackofficePage() {
   const [generatedCount, setGeneratedCount] = useState(0);
   const [isFlushing, setIsFlushing] = useState(false);
   const [currentTotal, setCurrentTotal] = useState(0);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigResponse | null>(null);
   const stopRequestedRef = useRef(false);
 
   const refreshCount = async () => {
@@ -238,6 +255,23 @@ export default function BackofficePage() {
 
   useEffect(() => {
     refreshCount();
+  }, []);
+
+  useEffect(() => {
+    const loadRuntimeConfig = async () => {
+      try {
+        const response = await fetch('/api/runtime-config', { method: 'GET' });
+        if (!response.ok) {
+          throw new Error(`Failed to load runtime config (${response.status})`);
+        }
+        const data = (await response.json()) as RuntimeConfigResponse;
+        setRuntimeConfig(data);
+      } catch (error) {
+        console.error('Failed to fetch runtime config:', error);
+      }
+    };
+
+    loadRuntimeConfig();
   }, []);
 
   useEffect(() => {
@@ -335,6 +369,36 @@ export default function BackofficePage() {
           <p className="mt-1 text-sm text-slate-300">
             Total locations in database: <span className="font-semibold">{currentTotal}</span>
           </p>
+          <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/60 p-3 text-xs text-slate-300">
+            <p className="font-semibold text-slate-200">Environment debug</p>
+            <p className="mt-1">
+              Client API mode: <span className="text-white">{runtimeConfig?.client.mode ?? 'loading...'}</span>
+            </p>
+            <p>
+              Client NEXT_PUBLIC_BE_URL:{' '}
+              <span className="text-white">{runtimeConfig?.client.nextPublicBeUrl ?? '(not set)'}</span>
+            </p>
+            <p>
+              Effective REST target:{' '}
+              <span className="text-white">
+                {runtimeConfig?.client.mode === 'direct'
+                  ? runtimeConfig.client.effectiveApiPrefix
+                  : '/api/v1/... (same-origin proxy)'}
+              </span>
+            </p>
+            <p>
+              Server BE_URL/BACKEND_URL:{' '}
+              <span className="text-white">{runtimeConfig?.server.beUrl ?? '(not set)'}</span>
+            </p>
+            <p>
+              Client NEXT_PUBLIC_WS_URL:{' '}
+              <span className="text-white">{runtimeConfig?.client.nextPublicWsUrl ?? '(not set)'}</span>
+            </p>
+            <p>
+              Effective WS URL:{' '}
+              <span className="text-white">{getRealtimeWsUrl() ?? '(disabled / polling only)'}</span>
+            </p>
+          </div>
           <Button onClick={refreshCount} className="mt-3 bg-slate-700 text-white hover:bg-slate-600">
             Refresh Total
           </Button>

@@ -40,6 +40,21 @@ export function getRealtimeWsUrl(): string | null {
   return null;
 }
 
+export function getRealtimeDebugConfig(): {
+  nextPublicWsUrl: string | null;
+  derivedFromBeUrl: string | null;
+  effectiveWsUrl: string | null;
+} {
+  const nextPublicWsUrl = process.env.NEXT_PUBLIC_WS_URL?.trim() || null;
+  const beUrl = process.env.NEXT_PUBLIC_BE_URL?.trim() || null;
+  const derivedFromBeUrl = beUrl ? getWsUrlFromBeUrl(beUrl) : null;
+  return {
+    nextPublicWsUrl,
+    derivedFromBeUrl,
+    effectiveWsUrl: nextPublicWsUrl ?? derivedFromBeUrl,
+  };
+}
+
 function isLocationLike(value: unknown): value is Location {
   if (!value || typeof value !== "object") {
     return false;
